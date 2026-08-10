@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Trading Bot Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0a0a1a;color:#e0e0e0;min-height:100vh;padding:12px}
+.header{text-align:center;padding:16px 0;border-bottom:1px solid #1a2a4a;margin-bottom:16px}
+.header h1{font-size:18px;color:#00d4aa;font-weight:600}
+.header .sub{font-size:11px;color:#666;margin-top:4px}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;animation:pulse 2s infinite}
+.dot-live{background:#00d4aa}.dot-wait{background:#ffa500}.dot-off{background:#ff4444}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.card{background:#111128;border:1px solid #1a2a4a;border-radius:10px;padding:14px}
+.card .label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.card .value{font-size:22px;font-weight:700}
+.card .value.green{color:#00d4aa}.card .value.red{color:#ff4444}.card .value.yellow{color:#ffc107}
+.card .detail{font-size:11px;color:#888;margin-top:4px}
+.full{grid-column:1/-1}
+.trend-row{display:flex;gap:10px;margin-bottom:14px}
+.trend-card{flex:1;background:#111128;border:1px solid #1a2a4a;border-radius:10px;padding:10px 14px;text-align:center}
+.trend-card .pair{font-size:11px;color:#888;margin-bottom:4px}
+.trend-card .dir{font-size:14px;font-weight:600}
+.dir.alcista{color:#00d4aa}.dir.bajista{color:#ff4444}.dir.desconocido{color:#666}
+.trades-section{background:#111128;border:1px solid #1a2a4a;border-radius:10px;padding:14px;margin-top:14px}
+.trades-section h3{font-size:13px;color:#888;margin-bottom:10px}
+.trade-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1a1a2e;font-size:12px}
+.trade-row:last-child{border-bottom:none}
+.trade-pnl-pos{color:#00d4aa;font-weight:600}.trade-pnl-neg{color:#ff4444;font-weight:600}
+.footer{text-align:center;margin-top:20px;font-size:10px;color:#444}
+.conn-status{font-size:11px;padding:6px 12px;border-radius:20px;display:inline-block;margin-top:8px}
+.conn-on{background:#00d4aa22;color:#00d4aa;border:1px solid #00d4aa44}
+.conn-off{background:#ff444422;color:#ff4444;border:1px solid #ff444444}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><span class="status-dot dot-off" id="dot"></span>TRADING BOT</h1>
+  <div class="sub" id="subtitle">ETHUSDT 4h · Cargando...</div>
+  <div class="conn-status conn-off" id="conn">🔴 Desconectado del bot local</div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="label">ETH Precio</div>
+    <div class="value" id="eth-price">--</div>
+  </div>
+  <div class="card">
+    <div class="label">SOL Precio</div>
+    <div class="value" id="sol-price">--</div>
+  </div>
+  <div class="card">
+    <div class="label">Saldo USDT</div>
+    <div class="value" id="balance">--</div>
+    <div class="detail" id="balance-detail">Conecta el bot local</div>
+  </div>
+  <div class="card">
+    <div class="label">Posicion</div>
+    <div class="value" id="position">--</div>
+    <div class="detail" id="pos-detail"></div>
+  </div>
+</div>
+
+<div class="trend-row">
+  <div class="trend-card">
+    <div class="pair">ETHUSDT</div>
+    <div class="dir desconocido" id="trend-eth">--</div>
+  </div>
+  <div class="trend-card">
+    <div class="pair">SOLUSDT</div>
+    <div class="dir desconocido" id="trend-sol">--</div>
+  </div>
+</div>
+
+<div class="trades-section">
+  <h3>Trades Cerrados (<span id="trade-count">0</span>)</h3>
+  <div id="trades-list"><div style="color:#444;font-size:12px">Sin datos del bot local</div></div>
+</div>
+
+<div class="footer">Bot live · Datos cada 5s · No es asesoramiento financiero</div>
+
+<script>
+let tg=null;
+try{if(window.Telegram&&window.Telegram.WebApp){tg=window.Telegram.WebApp;tg.expand();tg.ready()}}catch(e){}
+
+const BINANCE='https://api.binance.com/api/v3';
+const LOCAL='http://localhost:5000';
+let localOk=false;
+
+async function fetchPrices(){
+  try{
+    const[s,r]=await Promise.all([
+      fetch(BINANCE+'/ticker/price?symbol=ETHUSDT'),
+      fetch(BINANCE+'/ticker/price?symbol=SOLUSDT')
+    ]);
+    const sd=await s.json(); const rd=await r.json();
+    document.getElementById('eth-price').textContent='$'+parseFloat(sd.price).toFixed(2);
+    document.getElementById('sol-price').textContent='$'+parseFloat(rd.price).toFixed(2);
+    document.getElementById('eth-price').className='value';
+    document.getElementById('sol-price').className='value';
+  }catch(e){console.error('prices:',e)}
+}
+
+async function fetchLocal(){
+  try{
+    const r=await fetch(LOCAL+'/api/status',{signal:AbortSignal.timeout(3000)});
+    const d=await r.json();
+    localOk=true;
+    document.getElementById('conn').className='conn-status conn-on';
+    document.getElementById('conn').textContent='🟢 Conectado al bot local';
+    document.getElementById('dot').className='status-dot '+(d.position==='long'?'dot-live':'dot-wait');
+
+    document.getElementById('balance').textContent='$'+d.balance.toFixed(2);
+    document.getElementById('balance').className='value green';
+    document.getElementById('balance-detail').textContent='Base $'+d.base_capital;
+
+    document.getElementById('eth-price').textContent='$'+d.eth_price.toFixed(2);
+
+    const pos=d.position||'NINGUNA';
+    document.getElementById('position').textContent=pos==='long'?'LONG':'SIN POSICION';
+    document.getElementById('position').className='value '+(pos==='long'?'yellow':'');
+    if(pos==='long'){
+      const u=d.unrealized_pnl;
+      document.getElementById('pos-detail').textContent=
+        d.qty.toFixed(5)+' ETH @ $'+d.entry.toFixed(2)+' | PnL: '+(u>=0?'+':'')+u.toFixed(2);
+      document.getElementById('pos-detail').className='detail '+(u>=0?'green':'red');
+    }else{
+      document.getElementById('pos-detail').textContent='Esperando senal';
+      document.getElementById('pos-detail').className='detail';
+    }
+
+    document.getElementById('trend-eth').textContent=d.trend_eth;
+    document.getElementById('trend-eth').className='dir '+d.trend_eth.toLowerCase();
+    document.getElementById('trend-sol').textContent=d.trend_sol;
+    document.getElementById('trend-sol').className='dir '+d.trend_sol.toLowerCase();
+
+    document.getElementById('subtitle').textContent=
+      'ETHUSDT 4h · Trades: '+d.trades_count+' · '+new Date().toLocaleTimeString();
+
+    const tr=await fetch(LOCAL+'/api/trades',{signal:AbortSignal.timeout(3000)});
+    const trades=await tr.json();
+    document.getElementById('trade-count').textContent=trades.length;
+    if(trades.length>0){
+      let h='';
+      trades.slice(-10).reverse().forEach(t=>{
+        const cls=t.pnl>=0?'trade-pnl-pos':'trade-pnl-neg';
+        h+='<div class="trade-row"><span>'+t.symbol+' · '+(t.razon||'')+'</span>';
+        h+='<span class="'+cls+'">'+(t.pnl>=0?'+':'')+t.pnl.toFixed(2)+'</span></div>';
+      });
+      document.getElementById('trades-list').innerHTML=h;
+    }
+  }catch(e){
+    localOk=false;
+    document.getElementById('conn').className='conn-status conn-off';
+    document.getElementById('conn').textContent='🔴 Bot local apagado (precios en vivo)';
+    document.getElementById('dot').className='status-dot dot-off';
+    document.getElementById('subtitle').textContent='Precios en vivo · Bot local offline · '+new Date().toLocaleTimeString();
+  }
+}
+
+fetchPrices(); fetchLocal();
+setInterval(fetchPrices,3000);
+setInterval(fetchLocal,5000);
+</script>
+</body>
+</html>
