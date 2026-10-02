@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  html:
+    name: Validar HTML
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # El dashboard es un solo HTML autocontenido: la unica comprobacion
+      # automatizable sin navegador es que el HTML este balanceado y bien formado.
+      - name: Validar que index.html parsea correctamente
+        run: |
+          python -c "
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class V(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.stack = []
+                  self.err = []
+              def handle_starttag(self, tag, attrs):
+                  if tag not in ('meta', 'link', 'img', 'br', 'hr', 'input', 'source'):
+                      self.stack.append(tag)
+              def handle_endtag(self, tag):
+                  if self.stack and self.stack[-1] == tag:
+                      self.stack.pop()
+                  elif tag in self.stack:
+                      self.err.append('cierre inesperado: ' + tag)
+
+          src = Path('index.html').read_text(encoding='utf-8')
+          v = V()
+          v.feed(src)
+          v.close()
+          if v.err:
+              raise SystemExit('::error::' + '; '.join(v.err))
+          if v.stack:
+              raise SystemExit('::error::etiquetas sin cerrar: ' + ', '.join(v.stack))
+          if len(src) < 500:
+              raise SystemExit('::error::index.html suspiciously pequeno')
+          print('OK: index.html valido,', len(src), 'bytes')
+          "
+
+      - name: Verificar que no haya claves de API hardcodeadas
+        run: |
+          if git grep -nE '(api[-_]?key|secret|token)[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9_-]{16,}' -- '*.html' '*.js'; then
+            echo '::error::posible credencial hardcodeada en el frontend'
+            exit 1
+          fi
+          echo 'OK: sin credenciales en el frontend'
